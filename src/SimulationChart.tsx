@@ -45,30 +45,7 @@ export default function SimulationChart({ params }: Props) {
   const [top, setTop] = useState<number | undefined>(undefined);
   const [bottom, setBottom] = useState<number | undefined>(undefined);
   const [chainlinkPrice, setChainlinkPrice] = useState<number | null>(null);
-  const [currentCoinbasePrice, setCurrentCoinbasePrice] = useState<
-    number | null
-  >(null);
   const [cde, setCde] = useState<number>(0);
-  const [adaptiveThresholds, setAdaptiveThresholds] = useState<
-    { upper: number; lower: number }[]
-  >([]);
-  const [cdeValues, setCdeValues] = useState<number[]>([]);
-  const [initialCde, setInitialCde] = useState<number>(1000);
-  const [secondChartLeft, setSecondChartLeft] = useState<number | undefined>(
-    undefined
-  );
-  const [secondChartRight, setSecondChartRight] = useState<number | undefined>(
-    undefined
-  );
-  const [secondChartTop, setSecondChartTop] = useState<number | undefined>(
-    undefined
-  );
-  const [secondChartBottom, setSecondChartBottom] = useState<
-    number | undefined
-  >(undefined);
-  const [adaptiveOraclePrice, setAdaptiveOraclePrice] = useState<number | null>(
-    null
-  );
 
   const calculateCDE = useCallback((prices: PricePoint[]) => {
     if (prices.length < 2) return 0;
@@ -115,7 +92,6 @@ export default function SimulationChart({ params }: Props) {
         if (parsedData.type === "ticker" && parsedData.price) {
           const price = parseFloat(parsedData.price);
           const timestamp = Date.now();
-          setCurrentCoinbasePrice(price);
 
           setData((prevData) => {
             const newData = [
@@ -136,8 +112,6 @@ export default function SimulationChart({ params }: Props) {
 
           // Update CDE
           setData((prevData) => {
-            const newCde = calculateCDE(prevData);
-            setCde(newCde);
             return prevData;
           });
 
@@ -258,127 +232,20 @@ export default function SimulationChart({ params }: Props) {
     lowerThreshold: thresholds.lower,
   }));
 
+  // Calculate current deviation and CDE
   const getDeviationPercentage = () => {
-    if (!currentCoinbasePrice || !chainlinkPrice) return 0;
-    return (
-      ((chainlinkPrice - currentCoinbasePrice) / currentCoinbasePrice) * 100
-    );
+    if (!data.length || !chainlinkPrice) return 0;
+    const last = data[data.length - 1];
+    return ((chainlinkPrice - last.ref) / last.ref) * 100;
   };
-
   const getDeviationValue = () => {
-    if (!currentCoinbasePrice || !chainlinkPrice) return 0;
-    return chainlinkPrice - currentCoinbasePrice;
+    if (!data.length || !chainlinkPrice) return 0;
+    const last = data[data.length - 1];
+    return chainlinkPrice - last.ref;
   };
-
-  // Calculate adaptive thresholds based on price volatility
-  const calculateAdaptiveThresholds = useCallback((prices: PricePoint[]) => {
-    if (prices.length < 2) return [];
-
-    const thresholds = prices.map((point, index) => {
-      if (index === 0)
-        return { upper: point.oracle * 1.005, lower: point.oracle * 0.995 };
-
-      // Calculate rolling standard deviation of the last 10 points
-      const lookback = Math.min(10, index);
-      const recentPrices = prices
-        .slice(index - lookback, index + 1)
-        .map((p) => p.oracle);
-      const mean =
-        recentPrices.reduce((a, b) => a + b, 0) / recentPrices.length;
-      const variance =
-        recentPrices.reduce((a, b) => a + Math.pow(b - mean, 2), 0) /
-        recentPrices.length;
-      const stdDev = Math.sqrt(variance);
-
-      // Adjust threshold based on volatility
-      const volatilityFactor = Math.min(0.01, stdDev / mean); // Cap at 1%
-      return {
-        upper: point.oracle * (1 + volatilityFactor),
-        lower: point.oracle * (1 - volatilityFactor),
-      };
-    });
-
-    return thresholds;
-  }, []);
-
-  // Update adaptive thresholds when data changes
   useEffect(() => {
-    const newThresholds = calculateAdaptiveThresholds(data);
-    setAdaptiveThresholds(newThresholds);
-  }, [data, calculateAdaptiveThresholds]);
-
-  // Calculate CDE values over time
-  useEffect(() => {
-    const newCdeValues = data.map((_, index) => {
-      if (index < 2) return 0;
-      return calculateCDE(data.slice(0, index + 1));
-    });
-    setCdeValues(newCdeValues);
+    setCde(calculateCDE(data));
   }, [data, calculateCDE]);
-
-  // Update adaptive oracle price when thresholds are hit
-  useEffect(() => {
-    if (!data.length || !chainlinkPrice) return;
-
-    const currentPoint = data[data.length - 1];
-    const currentThresholds = adaptiveThresholds[adaptiveThresholds.length - 1];
-
-    if (!currentThresholds) return;
-
-    const deviation =
-      Math.abs(currentPoint.ref - chainlinkPrice) / chainlinkPrice;
-    const thresholdDeviation =
-      Math.abs(currentThresholds.upper - currentThresholds.lower) /
-      (2 * chainlinkPrice);
-
-    if (deviation > thresholdDeviation) {
-      setAdaptiveOraclePrice(currentPoint.ref);
-    } else {
-      setAdaptiveOraclePrice(chainlinkPrice);
-    }
-  }, [data, chainlinkPrice, adaptiveThresholds]);
-
-  const zoomSecondChart = () => {
-    if (secondChartLeft === undefined || secondChartRight === undefined) return;
-    let leftNum = secondChartLeft;
-    let rightNum = secondChartRight;
-    if (leftNum > rightNum) {
-      [leftNum, rightNum] = [rightNum, leftNum];
-    }
-
-    const selectedData = data.filter(
-      (item) => item.t >= leftNum && item.t <= rightNum
-    );
-    const minValue = Math.min(
-      ...selectedData.map((item) => Math.min(item.ref, item.oracle))
-    );
-    const maxValue = Math.max(
-      ...selectedData.map((item) => Math.max(item.ref, item.oracle))
-    );
-
-    setSecondChartLeft(leftNum);
-    setSecondChartRight(rightNum);
-    setSecondChartBottom(minValue);
-    setSecondChartTop(maxValue);
-  };
-
-  const getSecondChartDomain = () => {
-    if (secondChartLeft === undefined || secondChartRight === undefined)
-      return undefined;
-    return [secondChartLeft, secondChartRight];
-  };
-
-  const getSecondChartYDomain = () => {
-    if (secondChartBottom === undefined || secondChartTop === undefined) {
-      const allPrices = data.map((item) => [item.ref, item.oracle]).flat();
-      if (allPrices.length === 0) return undefined;
-      const min = Math.min(...allPrices);
-      const max = Math.max(...allPrices);
-      const padding = (max - min) * 0.02;
-      return [min - padding, max + padding];
-    }
-    return [secondChartBottom, secondChartTop];
-  };
 
   return (
     <div
@@ -392,116 +259,123 @@ export default function SimulationChart({ params }: Props) {
         flexDirection: "column",
         justifyContent: "center",
         alignItems: "center",
-        gap: "20px",
+        background: "#fff",
       }}
     >
       <div
         style={{
           position: "absolute",
-          top: "20px",
+          top: "30px",
           left: "50%",
           transform: "translateX(-50%)",
           zIndex: 1000,
-          background: "rgba(255, 255, 255, 0.9)",
-          padding: "10px 20px",
-          borderRadius: "8px",
-          boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+          background: "rgba(255, 255, 255, 0.95)",
+          padding: "14px 32px",
+          borderRadius: "12px",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.10)",
           display: "flex",
-          gap: "20px",
+          gap: "32px",
           alignItems: "center",
         }}
       >
-        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          <div style={{ fontWeight: "bold" }}>CDE Controls</div>
-          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-            <button
-              onClick={() => {
-                if (cdeValues.length === 0) return;
-                const min = Math.min(...cdeValues);
-                const max = Math.max(...cdeValues);
-                const range = max - min;
-                const newRange = range * 0.8; // Zoom in by 20%
-                const center = (max + min) / 2;
-                setSecondChartBottom(center - newRange / 2);
-                setSecondChartTop(center + newRange / 2);
-              }}
-              style={{
-                padding: "5px",
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  d="M15.5 14H14.71L14.43 13.73C15.41 12.59 16 11.11 16 9.5C16 5.91 13.09 3 9.5 3C5.91 3 3 5.91 3 9.5C3 13.09 5.91 16 9.5 16C11.11 16 12.59 15.41 13.73 14.43L14 14.71V15.5L19 20.49L20.49 19L15.5 14ZM9.5 14C7.01 14 5 11.99 5 9.5C5 7.01 7.01 5 9.5 5C11.99 5 14 7.01 14 9.5C14 11.99 11.99 14 9.5 14Z"
-                  fill="currentColor"
-                />
-                <path d="M12 9.5H7V10.5H12V9.5Z" fill="currentColor" />
-                <path d="M9.5 7V12H10.5V7H9.5Z" fill="currentColor" />
-              </svg>
-            </button>
-            <button
-              onClick={() => {
-                if (cdeValues.length === 0) return;
-                const min = Math.min(...cdeValues);
-                const max = Math.max(...cdeValues);
-                const range = max - min;
-                const newRange = range * 1.2; // Zoom out by 20%
-                const center = (max + min) / 2;
-                setSecondChartBottom(center - newRange / 2);
-                setSecondChartTop(center + newRange / 2);
-              }}
-              style={{
-                padding: "5px",
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  d="M15.5 14H14.71L14.43 13.73C15.41 12.59 16 11.11 16 9.5C16 5.91 13.09 3 9.5 3C5.91 3 3 5.91 3 9.5C3 13.09 5.91 16 9.5 16C11.11 16 12.59 15.41 13.73 14.43L14 14.71V15.5L19 20.49L20.49 19L15.5 14ZM9.5 14C7.01 14 5 11.99 5 9.5C5 7.01 7.01 5 9.5 5C11.99 5 14 7.01 14 9.5C14 11.99 11.99 14 9.5 14Z"
-                  fill="currentColor"
-                />
-                <path d="M7 9.5H12V10.5H7V9.5Z" fill="currentColor" />
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          <div style={{ fontWeight: "bold" }}>Current Values</div>
-          <div>Current CDE: {cde.toFixed(2)} PE</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          <div style={{ fontWeight: "bold" }}>Current Metrics</div>
           <div>Deviation: {getDeviationPercentage().toFixed(2)}%</div>
           <div>
             Deviation Value: {getDeviationValue() > 0 ? "+" : ""}
             {getDeviationValue().toFixed(2)} USD
           </div>
+          <div>CDE: {cde.toFixed(2)} PE</div>
+        </div>
+        <div style={{ display: "flex", gap: "10px" }}>
+          <button
+            onClick={() => {
+              if (bottom === undefined || top === undefined) return;
+              const range = top - bottom;
+              const newRange = range * 0.8; // Zoom in by 20%
+              const center = (top + bottom) / 2;
+              setBottom(center - newRange / 2);
+              setTop(center + newRange / 2);
+            }}
+            style={{
+              padding: "7px",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M15.5 14H14.71L14.43 13.73C15.41 12.59 16 11.11 16 9.5C16 5.91 13.09 3 9.5 3C5.91 3 3 5.91 3 9.5C3 13.09 5.91 16 9.5 16C11.11 16 12.59 15.41 13.73 14.43L14 14.71V15.5L19 20.49L20.49 19L15.5 14ZM9.5 14C7.01 14 5 11.99 5 9.5C5 7.01 7.01 5 9.5 5C11.99 5 14 7.01 14 9.5C14 11.99 11.99 14 9.5 14Z"
+                fill="currentColor"
+              />
+              <path d="M12 9.5H7V10.5H12V9.5Z" fill="currentColor" />
+              <path d="M9.5 7V12H10.5V7H9.5Z" fill="currentColor" />
+            </svg>
+          </button>
+          <button
+            onClick={() => {
+              if (bottom === undefined || top === undefined) {
+                const allPrices = data
+                  .map((item) => [item.ref, item.oracle])
+                  .flat();
+                if (allPrices.length === 0) return;
+                const min = Math.min(...allPrices);
+                const max = Math.max(...allPrices);
+                const range = max - min;
+                const padding = range * 0.1; // 10% padding
+                setBottom(min - padding);
+                setTop(max + padding);
+              } else {
+                const range = top - bottom;
+                const newRange = range * 1.2; // Zoom out by 20%
+                const center = (top + bottom) / 2;
+                setBottom(center - newRange / 2);
+                setTop(center + newRange / 2);
+              }
+            }}
+            style={{
+              padding: "7px",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M15.5 14H14.71L14.43 13.73C15.41 12.59 16 11.11 16 9.5C16 5.91 13.09 3 9.5 3C5.91 3 3 5.91 3 9.5C3 13.09 5.91 16 9.5 16C11.11 16 12.59 15.41 13.73 14.43L14 14.71V15.5L19 20.49L20.49 19L15.5 14ZM9.5 14C7.01 14 5 11.99 5 9.5C5 7.01 7.01 5 9.5 5C11.99 5 14 7.01 14 9.5C14 11.99 11.99 14 9.5 14Z"
+                fill="currentColor"
+              />
+              <path d="M7 9.5H12V10.5H7V9.5Z" fill="currentColor" />
+            </svg>
+          </button>
         </div>
       </div>
       <div
         style={{
-          width: "80%",
-          height: "35%",
-          maxWidth: "1200px",
+          width: "90vw",
+          height: "75vh",
+          maxWidth: "1600px",
+          maxHeight: "900px",
+          marginTop: "80px",
         }}
       >
         <ResponsiveContainer>
@@ -512,7 +386,7 @@ export default function SimulationChart({ params }: Props) {
               refAreaLeft && e?.activeLabel && setRefAreaRight(e.activeLabel)
             }
             onMouseUp={zoom}
-            margin={{ top: 20, right: 30, left: 50, bottom: 20 }}
+            margin={{ top: 40, right: 50, left: 70, bottom: 40 }}
           >
             <CartesianGrid stroke="#ccc" />
             <XAxis
@@ -544,18 +418,26 @@ export default function SimulationChart({ params }: Props) {
               dataKey="upperThreshold"
               stroke="#ff4d4d"
               dot={false}
-              name="Upper Threshold"
-              strokeWidth={3}
+              name="Upper Threshold (+0.5%)"
+              strokeWidth={2}
               isAnimationActive={false}
+              data={data.map((point) => ({
+                ...point,
+                upperThreshold: point.oracle * 1.005,
+              }))}
             />
             <Line
               type="monotone"
               dataKey="lowerThreshold"
               stroke="#ffa64d"
               dot={false}
-              name="Lower Threshold"
-              strokeWidth={3}
+              name="Lower Threshold (−0.5%)"
+              strokeWidth={2}
               isAnimationActive={false}
+              data={data.map((point) => ({
+                ...point,
+                lowerThreshold: point.oracle * 0.995,
+              }))}
             />
             <Line
               type="monotone"
@@ -581,230 +463,6 @@ export default function SimulationChart({ params }: Props) {
                 fillOpacity={0.3}
               />
             ) : null}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-      <div
-        style={{
-          width: "80%",
-          maxWidth: "1200px",
-          background: "rgba(255, 255, 255, 0.9)",
-          padding: "15px",
-          borderRadius: "8px",
-          boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-          display: "flex",
-          gap: "30px",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          <div style={{ fontWeight: "bold" }}>CDE Bounds</div>
-          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-            <label>Initial CDE:</label>
-            <input
-              type="number"
-              value={initialCde}
-              onChange={(e) => setInitialCde(Number(e.target.value))}
-              style={{ width: "80px" }}
-            />
-            <span>PE</span>
-          </div>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          <div style={{ fontWeight: "bold" }}>Current Values</div>
-          <div>Current CDE: {cde.toFixed(2)} PE</div>
-          <div>Deviation: {getDeviationPercentage().toFixed(2)}%</div>
-          <div>
-            Deviation Value: {getDeviationValue() > 0 ? "+" : ""}
-            {getDeviationValue().toFixed(2)} USD
-          </div>
-        </div>
-      </div>
-      <div
-        style={{
-          width: "80%",
-          height: "35%",
-          maxWidth: "1200px",
-        }}
-      >
-        <ResponsiveContainer>
-          <LineChart
-            data={data.map((point) => ({
-              ...point,
-              oracle: adaptiveOraclePrice || point.oracle,
-            }))}
-            onMouseDown={(e) =>
-              e?.activeLabel && setSecondChartLeft(Number(e.activeLabel))
-            }
-            onMouseMove={(e) =>
-              secondChartLeft &&
-              e?.activeLabel &&
-              setSecondChartRight(Number(e.activeLabel))
-            }
-            onMouseUp={zoomSecondChart}
-            margin={{ top: 20, right: 30, left: 50, bottom: 20 }}
-          >
-            <CartesianGrid stroke="#ccc" />
-            <XAxis
-              dataKey="t"
-              allowDataOverflow
-              domain={getSecondChartDomain()}
-              tickFormatter={(value) => new Date(value).toLocaleTimeString()}
-            />
-            <YAxis
-              allowDataOverflow
-              domain={getSecondChartYDomain()}
-              tickFormatter={(value) => `$${value.toLocaleString()}`}
-            />
-            <Tooltip
-              labelFormatter={(value) => new Date(value).toLocaleString()}
-              formatter={(value: number) => [`$${value.toLocaleString()}`, ""]}
-            />
-            <Legend />
-            <Line
-              type="monotone"
-              dataKey="ref"
-              stroke="#000000"
-              name="Coinbase Price"
-              strokeWidth={3}
-            />
-            <Line
-              type="monotone"
-              dataKey="oracle"
-              stroke="#0066cc"
-              name="Adaptive Oracle Price"
-              strokeWidth={3}
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-      <div
-        style={{
-          display: "flex",
-          gap: "10px",
-          justifyContent: "center",
-          marginTop: "10px",
-          marginBottom: "30px",
-        }}
-      >
-        <button
-          onClick={() => {
-            if (secondChartBottom === undefined || secondChartTop === undefined)
-              return;
-            const range = secondChartTop - secondChartBottom;
-            const newRange = range * 0.8; // Zoom in by 20%
-            const center = (secondChartTop + secondChartBottom) / 2;
-            setSecondChartBottom(center - newRange / 2);
-            setSecondChartTop(center + newRange / 2);
-          }}
-          style={{
-            padding: "5px",
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <path
-              d="M15.5 14H14.71L14.43 13.73C15.41 12.59 16 11.11 16 9.5C16 5.91 13.09 3 9.5 3C5.91 3 3 5.91 3 9.5C3 13.09 5.91 16 9.5 16C11.11 16 12.59 15.41 13.73 14.43L14 14.71V15.5L19 20.49L20.49 19L15.5 14ZM9.5 14C7.01 14 5 11.99 5 9.5C5 7.01 7.01 5 9.5 5C11.99 5 14 7.01 14 9.5C14 11.99 11.99 14 9.5 14Z"
-              fill="currentColor"
-            />
-            <path d="M12 9.5H7V10.5H12V9.5Z" fill="currentColor" />
-            <path d="M9.5 7V12H10.5V7H9.5Z" fill="currentColor" />
-          </svg>
-        </button>
-        <button
-          onClick={() => {
-            if (
-              secondChartBottom === undefined ||
-              secondChartTop === undefined
-            ) {
-              // If not zoomed, zoom out from the current view
-              const allPrices = data
-                .map((item) => [item.ref, item.oracle])
-                .flat();
-              if (allPrices.length === 0) return;
-              const min = Math.min(...allPrices);
-              const max = Math.max(...allPrices);
-              const range = max - min;
-              const padding = range * 0.1; // 10% padding
-              setSecondChartBottom(min - padding);
-              setSecondChartTop(max + padding);
-            } else {
-              // If already zoomed, zoom out by 20%
-              const range = secondChartTop - secondChartBottom;
-              const newRange = range * 1.2; // Zoom out by 20%
-              const center = (secondChartTop + secondChartBottom) / 2;
-              setSecondChartBottom(center - newRange / 2);
-              setSecondChartTop(center + newRange / 2);
-            }
-          }}
-          style={{
-            padding: "5px",
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <path
-              d="M15.5 14H14.71L14.43 13.73C15.41 12.59 16 11.11 16 9.5C16 5.91 13.09 3 9.5 3C5.91 3 3 5.91 3 9.5C3 13.09 5.91 16 9.5 16C11.11 16 12.59 15.41 13.73 14.43L14 14.71V15.5L19 20.49L20.49 19L15.5 14ZM9.5 14C7.01 14 5 11.99 5 9.5C5 7.01 7.01 5 9.5 5C11.99 5 14 7.01 14 9.5C14 11.99 11.99 14 9.5 14Z"
-              fill="currentColor"
-            />
-            <path d="M7 9.5H12V10.5H7V9.5Z" fill="currentColor" />
-          </svg>
-        </button>
-      </div>
-      <div
-        style={{
-          width: "80%",
-          height: "35%",
-          maxWidth: "1200px",
-          marginTop: "30px",
-        }}
-      >
-        <ResponsiveContainer>
-          <LineChart
-            data={data.map((point, index) => ({
-              t: point.t,
-              cde: cdeValues[index],
-            }))}
-            margin={{ top: 20, right: 30, left: 50, bottom: 20 }}
-          >
-            <CartesianGrid stroke="#ccc" />
-            <XAxis
-              dataKey="t"
-              allowDataOverflow
-              tickFormatter={(value) => new Date(value).toLocaleTimeString()}
-            />
-            <YAxis
-              allowDataOverflow
-              tickFormatter={(value) => `${value.toFixed(2)} PE`}
-            />
-            <Tooltip
-              labelFormatter={(value) => new Date(value).toLocaleString()}
-              formatter={(value: number) => [`${value.toFixed(2)} PE`, "CDE"]}
-            />
-            <Legend />
           </LineChart>
         </ResponsiveContainer>
       </div>
